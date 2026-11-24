@@ -1,38 +1,35 @@
 @echo off
 chcp 65001 > nul
+title Push B7PROXTRADING to GitHub
 echo ========================================================
 echo   UPLOAD PROYEK KE GITHUB & TRIGGER BUILD APK OTOMATIS
 echo ========================================================
 echo.
-
-set /p REPO_URL="Masukkan URL Repository GitHub Anda (contoh: https://github.com/username/b7prox.git): "
-
-if "%REPO_URL%"=="" (
-    echo [!] URL tidak boleh kosong!
-    pause
-    exit /b
-)
-
+echo Target Repository: https://github.com/johnybetty/B7PROXTRADING.git
 echo.
-echo [*] Menyiapkan file & commit...
+echo [*] Memeriksa status file...
 git add .
-git commit -m "Setup Android Chaquopy & GitHub Actions APK Build"
+git commit -m "Setup Android Chaquopy & GitHub Actions APK Build" >nul 2>&1
 
-echo [*] Mengarahkan branch ke main...
-git branch -M main
+echo [*] Mengupload commit ke GitHub (main branch)...
+echo [i] Jika jendela browser muncul, klik tombol hijau "Authorize" / "Sign in with your browser"...
+echo.
 
-echo [*] Menghubungkan remote origin...
-git remote remove origin >nul 2>&1
-git remote add origin %REPO_URL%
-
-echo [*] Mengupload kode ke GitHub...
 git push -u origin main
 
-echo.
-echo ========================================================
-echo  SELESAI! GitHub sekarang sedang mem-build APK Anda.
-echo  Buka tab 'Actions' di halaman repository GitHub Anda
-echo  untuk melihat proses dan mendownload file APK-nya!
-echo ========================================================
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo ========================================================
+    echo  BERHASIL! Kode telah terupload ke GitHub.
+    echo.
+    echo  Server GitHub sekarang sedang mem-build APK Anda!
+    echo  Buka link ini untuk memantau & download APK:
+    echo  https://github.com/johnybetty/B7PROXTRADING/actions
+    echo ========================================================
+) else (
+    echo.
+    echo [!] Push gagal atau jendela login dibatalkan.
+)
+
 echo.
 pause
