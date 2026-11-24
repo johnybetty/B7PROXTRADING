@@ -27,28 +27,24 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Ensure Python Files Synced
         run: |
           mkdir -p android_project/app/src/main/python
           cp -u *.py android_project/app/src/main/python/ || true
-          ls -la android_project/app/src/main/python/
-
-      - name: Setup Gradle Wrapper
-        run: |
-          cd android_project
-          gradle wrapper --gradle-version 8.6
-          chmod +x gradlew
 
       - name: Build APK with Gradle
         run: |
           cd android_project
-          ./gradlew assembleDebug --stacktrace
+          gradle assembleDebug --stacktrace
 
       - name: Rename & Prepare APK Artifact
         run: |
