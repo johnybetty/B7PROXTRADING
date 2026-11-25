@@ -18,6 +18,9 @@ import ssl
 import sys
 import threading
 import time
+import urllib.request
+from email.utils import parsedate_to_datetime
+from datetime import timezone
 from typing import Optional
 
 try:
@@ -72,12 +75,44 @@ class PhoenixOrderClient:
         self._thread: Optional[threading.Thread] = None
         self._ws = None
         self._joined = False
+        self._joined_topics = set()
         self._join_refs = {}
         self._pending_replies = {}  # ref -> asyncio.Future
         self._ref = 1
         self._running = False
         self._lock = threading.Lock()
         self.status = "DISCONNECTED"
+        self._time_offset_ms = 0
+        self._last_time_sync = 0.0
+
+    def _sync_server_time(self, force: bool = False) -> int:
+        now_mono = time.monotonic()
+        if not force and (now_mono - self._last_time_sync < 60.0):
+            return self._time_offset_ms
+        try:
+            api_domain = 'stockity.com' if self.broker == 'Stockity' else 'binomo5.com'
+            url = f"https://api.{api_domain}/platform/private/v2/profile?locale=en"
+            req = urllib.request.Request(url, headers={
+                'authorization-token': self.authtoken,
+                'device-id': str(self.device_id),
+                'device-type': 'web',
+                'User-Agent': self.user_agent,
+            })
+            t0 = time.time() * 1000
+            with urllib.request.urlopen(req, context=get_ssl_context(), timeout=4) as resp:
+                t1 = time.time() * 1000
+                date_hdr = resp.headers.get("Date") or resp.headers.get("date")
+                if date_hdr:
+                    dt = parsedate_to_datetime(date_hdr)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    server_ms = dt.timestamp() * 1000
+                    local_mid = (t0 + t1) / 2.0
+                    self._time_offset_ms = int(server_ms - local_mid)
+                    self._last_time_sync = now_mono
+        except Exception:
+            pass
+        return self._time_offset_ms
 
     def update_credentials(self, authtoken: str, device_id: str, pair: Optional[str] = None):
         with self._lock:
@@ -182,6 +217,7 @@ class PhoenixOrderClient:
                     self._ws = ws
                     self.status = "CONNECTED"
                     self._joined = False
+                    self._joined_topics.clear()
                     self._join_refs.clear()
 
                     # Join Phoenix channels
@@ -213,13 +249,14 @@ class PhoenixOrderClient:
                                 payload = msg.get("payload", {})
                                 if ref in self._join_refs.values():
                                     st = payload.get("status")
-                                    if st == "ok":
-                                        pass  # Join success
+                                    if st == "ok" and topic:
+                                        self._joined_topics.add(topic)
                                 future = self._pending_replies.pop(ref, None)
                                 if future and not future.done():
                                     future.set_result(msg)
 
-                            self._joined = True
+                            if "bo" in self._joined_topics or len(self._joined_topics) >= 2:
+                                self._joined = True
                     finally:
                         heartbeat_task.cancel()
             except Exception as e:
@@ -263,10 +300,15 @@ class PhoenixOrderClient:
 
         p_name = pair or self.pair
         dir_str = "call" if str(direction).upper() in ("BUY", "CALL", "UP") else "put"
-        acc_type = "demo" if wallet.upper() == "DEMO" else "real"
-        exp = calculate_turbo_expire_at(duration_seconds)
-        now_ms = int(time.time() * 1000)
-        amount_subunits = int(float(amount) * 100)
+        acc_type = "demo" if str(wallet).strip().upper() == "DEMO" else "real"
+        offset_ms = self._sync_server_time()
+        now_ms = int(time.time() * 1000) + offset_ms
+        # Hitung expire_at berdasarkan waktu server broker
+        now_sec = now_ms / 1000.0
+        sec = int(now_sec) % 60
+        base_min = (int(now_sec) // 60) * 60
+        exp = (base_min + 60) if sec < 30 else (base_min + 120)
+        amount_subunits = int(round(float(amount) * 100))
 
         payload = {
             "amount":        amount_subunits,
@@ -294,7 +336,7 @@ class PhoenixOrderClient:
 
     async def _async_place_order(self, payload: dict) -> dict:
         ref = self._next_ref()
-        bo_join_ref = self._join_refs.get("user") or self._join_refs.get("bo") or ref
+        bo_join_ref = self._join_refs.get("bo") or self._join_refs.get("user") or ref
 
         order_msg = {
             "topic":    "bo",
@@ -340,6 +382,13 @@ _client: Optional[PhoenixOrderClient] = None
 
 def get_order_client(broker: str = 'Binomo', authtoken: str = '', device_id: str = '', pair: str = 'Z-CRY/IDX') -> PhoenixOrderClient:
     global _client
+    if _client is not None and _client.broker != broker:
+        try:
+            _client.stop()
+        except Exception:
+            pass
+        _client = None
+
     if _client is None:
         _client = PhoenixOrderClient(broker=broker, authtoken=authtoken, device_id=device_id, pair=pair)
         _client.start()

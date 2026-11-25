@@ -527,7 +527,11 @@ def watch_and_resolve_deal(order_entry, direction, bet, entry_price, pair, candl
         if app_state.get('feed_mode') == 'LIVE' and app_state.get('authtoken') and app_state.get('device_id'):
             try:
                 acc_type = app_state.get('wallet', 'DEMO').lower()
-                url = f"https://api.binomo5.com/bo-deals-history/v3/deals/trade?type={acc_type}&locale=en"
+                api_dom = 'stockity.com' if app_state.get('broker') == 'Stockity' else 'binomo5.com'
+                url = f"https://api.{api_dom}/bo-deals-history/v3/deals/trade?type={acc_type}&locale=en"
+                ssl_ctx = ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
                 req = urllib.request.Request(
                     url,
                     headers={
@@ -541,7 +545,7 @@ def watch_and_resolve_deal(order_entry, direction, bet, entry_price, pair, candl
                 deadline = time.time() + 15.0
                 while time.time() < deadline:
                     try:
-                        with urllib.request.urlopen(req, timeout=5) as resp:
+                        with urllib.request.urlopen(req, context=ssl_ctx, timeout=5) as resp:
                             raw_data = resp.read().decode('utf-8', errors='replace')
                             data = json.loads(raw_data).get('data', {}).get('standard_trade_deals', [])
                             matched = None
@@ -705,6 +709,12 @@ def execute_auto_order(pair: str, candle_id: int, sec: float, price: float, sig_
                 # Flag akan direset oleh watch_and_resolve_deal di blok finally-nya
                 return
             else:
+                with lock:
+                    app_state['last_alert'] = {
+                        'type': 'info',
+                        'message': f"⚠️ Order {pair} ({app_state.get('wallet','DEMO')}) gagal: {err_msg[:120]}",
+                        'ts': time.time()
+                    }
                 threading.Thread(
                     target=lambda: append_signal_csv(sig, order_entry),
                     daemon=True
@@ -2317,8 +2327,8 @@ function renderOrderHistory(orders) {
       statusColor = 'var(--gold)';
       statusTxt = '⚖️ DRAW (Rp 0)';
     } else if (!o.ok) {
-      statusColor = '#888';
-      statusTxt = '❌ ERROR';
+      statusColor = 'var(--red)';
+      statusTxt = o.error ? `❌ ${o.error.slice(0, 45)}` : '❌ REJECTED';
     }
 
     return `<div style="background:var(--panel);border:1px solid var(--edge);border-radius:9px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
@@ -2875,7 +2885,11 @@ def fetch_broker_deals_history(acc_type: str = 'demo') -> list:
     if not token or not dev_id:
         return []
     try:
-        url = f"https://api.binomo5.com/bo-deals-history/v3/deals/trade?type={acc_type.lower()}&locale=en"
+        api_dom = 'stockity.com' if app_state.get('broker') == 'Stockity' else 'binomo5.com'
+        url = f"https://api.{api_dom}/bo-deals-history/v3/deals/trade?type={acc_type.lower()}&locale=en"
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(
             url,
             headers={
@@ -2886,7 +2900,7 @@ def fetch_broker_deals_history(acc_type: str = 'demo') -> list:
                 'Accept':              'application/json',
             }
         )
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, context=ssl_ctx, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8', errors='replace'))
             raw_deals = data.get('data', {}).get('standard_trade_deals', [])
 
@@ -3289,12 +3303,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json({'ok': True, 'msg': 'Sinkronisasi aset broker dimulai'})
 
         elif path == '/api/set_wallet':
-            val = query.get('val', ['DEMO'])[0]
+            val = str(query.get('val', ['DEMO'])[0]).upper()
+            if val not in ('DEMO', 'REAL'):
+                val = 'DEMO'
             with lock:
                 app_state['wallet'] = val
+                app_state['active_order_running'] = False
+                _last_ordered_deals.clear()
                 _bal_real = app_state['balance_real']
                 _bal_demo = app_state['balance_demo']
+                _broker = app_state.get('broker', 'Binomo')
+                _auth = app_state.get('authtoken', '')
+                _dev_id = app_state.get('device_id', '')
+                _pair = app_state.get('pair', 'Z-CRY/IDX')
+            save_session_config({'wallet': val})
             threading.Thread(target=refresh_balance, daemon=True).start()
+            if _auth and _dev_id:
+                try:
+                    get_order_client(broker=_broker, authtoken=_auth, device_id=_dev_id, pair=_pair)
+                except Exception:
+                    pass
             self._send_json({
                 'ok': True,
                 'wallet': val,
