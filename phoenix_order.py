@@ -27,6 +27,16 @@ except ImportError:
 
 logger = logging.getLogger('PhoenixOrder')
 
+def get_ssl_context():
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
 DOMAINS = {
     'Binomo':   'binomo5.com',
     'Stockity': 'stockity1.id',
@@ -155,12 +165,20 @@ class PhoenixOrderClient:
             try:
                 self.status = "CONNECTING"
                 headers = self._headers()
-                async with websockets.connect(
-                    self.ws_url,
-                    extra_headers=headers,
-                    ping_interval=None,
-                    close_timeout=5
-                ) as ws:
+                connect_kwargs = {
+                    'ssl': get_ssl_context(),
+                    'ping_interval': None,
+                    'close_timeout': 5
+                }
+                try:
+                    connect_kwargs['extra_headers'] = headers
+                    ws = await websockets.connect(self.ws_url, **connect_kwargs)
+                except TypeError:
+                    connect_kwargs.pop('extra_headers', None)
+                    connect_kwargs['additional_headers'] = headers
+                    ws = await websockets.connect(self.ws_url, **connect_kwargs)
+
+                async with ws:
                     self._ws = ws
                     self.status = "CONNECTED"
                     self._joined = False

@@ -4,7 +4,7 @@
 # Embedded file name: broker_api.py
 # Compiled at: 2026-11-12 20:24:15
 # Size of source mod 2**32: 75766 bytes
-import asyncio, json, math, time, threading
+import asyncio, json, math, time, threading, ssl
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -12,6 +12,16 @@ from typing import Dict, Optional
 import requests, websockets
 from session_login import open_browser_login_and_save, direct_login_and_save
 from urllib.parse import quote
+
+def get_ssl_context():
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 class BrokerAPI:
     __doc__ = '\n    Stockity/Binomo websocket connector.\n\n    V19 dual websocket price feed:\n    - Socket order Phoenix tetap memakai ws.stockity1.id.\n    - Socket harga terpisah memakai wss://as.stockity.com/.\n    - Subscribe dengan {"action":"subscribe","rics":[RIC]}.\n    - Parse data/assets/rate dan provider_time untuk FO exact tick.\n\n    V9 fix:\n    - WebSocket broker dibuat fresh per order agar order kedua tidak memakai event lama.\n    - Response order hanya dianggap valid dari phx_reply dengan ref order yang sama.\n    - Event opened lama yang broadcast setelah join tidak lagi membuat order palsu sukses.\n    - WebSocket ditutup setelah order accepted/reject untuk menghindari stale session.\n    '
@@ -564,6 +574,7 @@ class BrokerAPI:
         self._log(f"[PRICE WS CONNECT] {self.price_ws_url}")
         try:
             self._price_ws = await websockets.connect((self.price_ws_url),
+              ssl=get_ssl_context(),
               origin="https://stockity.com",
               extra_headers=headers,
               ping_interval=20,
@@ -571,6 +582,7 @@ class BrokerAPI:
               close_timeout=5)
         except TypeError:
             self._price_ws = await websockets.connect((self.price_ws_url),
+              ssl=get_ssl_context(),
               origin="https://stockity.com",
               additional_headers=headers,
               ping_interval=20,

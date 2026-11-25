@@ -32,11 +32,35 @@ WS_URLS = {
     'Binomo':   'wss://as.binomo5.com/',
     'Stockity': 'wss://as.stockity.com/',
 }
+WS_URL_CANDIDATES = {
+    'Binomo': [
+        'wss://as.binomo5.com/',
+        'wss://as.binomo.com/',
+        'wss://ws.binomo5.com/',
+    ],
+    'Stockity': [
+        'wss://as.stockity.com/',
+        'wss://as.stockity1.id/',
+        'wss://as.stockity.id/',
+        'wss://ws.stockity1.id/',
+    ],
+}
 ORIGINS = {
     'Binomo':   'https://binomo5.com',
     'Stockity': 'https://stockity.com',
 }
 # ─────────────────────────────────────────────────────────────────────────────
+
+def get_ssl_context():
+    """Create a permissive SSL context that works reliably on Android & PC."""
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
 def _parse_ts_ms(val, fallback_ms: int) -> int:
@@ -278,7 +302,8 @@ class LiveFeed:
             self._loop.close()
 
     async def _main_connect(self):
-        url    = WS_URLS.get(self.broker, WS_URLS['Binomo'])
+        broker_key = self.broker if self.broker in WS_URL_CANDIDATES else 'Binomo'
+        candidate_urls = WS_URL_CANDIDATES.get(broker_key, [WS_URLS.get(self.broker, 'wss://as.binomo5.com/')])
         origin = ORIGINS.get(self.broker, ORIGINS['Binomo'])
 
         headers = {
@@ -286,27 +311,38 @@ class LiveFeed:
             'device-id':   self.device_id,
             'device-type': 'web',
             'Origin':      origin,
-            'User-Agent':  'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36',
+            'User-Agent':  'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
         }
 
         attempt = 0
+        ssl_ctx = get_ssl_context()
         while not self._stop_event.is_set():
             attempt += 1
-            self.on_status(f'CONNECTING (attempt {attempt})...')
+            url = candidate_urls[(attempt - 1) % len(candidate_urls)]
+            url_host = url.split('/')[2] if '/' in url else url
+            self.on_status(f'CONNECTING {url_host} (#{attempt})...')
             try:
-                # Use extra_headers for standard websockets library
-                async with websockets.connect(
-                    url,
-                    extra_headers=headers,
-                    ping_interval=20,
-                    ping_timeout=15,
-                    close_timeout=5,
-                    max_size=10 * 1024 * 1024,
-                ) as ws:
+                connect_kwargs = {
+                    'ssl': ssl_ctx,
+                    'ping_interval': 20,
+                    'ping_timeout': 15,
+                    'close_timeout': 5,
+                    'max_size': 10 * 1024 * 1024,
+                }
+                try:
+                    connect_kwargs['extra_headers'] = headers
+                    ws = await websockets.connect(url, **connect_kwargs)
+                except TypeError:
+                    connect_kwargs.pop('extra_headers', None)
+                    connect_kwargs['additional_headers'] = headers
+                    ws = await websockets.connect(url, **connect_kwargs)
+
+                async with ws:
                     self._ws = ws
                     self.connected = True
                     self.error_message = ''
                     self.on_status('CONNECTED')
+                    attempt = 0
 
                     # Subscribe ke semua pair yang diminta
                     rics_to_sub = list(self.pairs)
@@ -330,22 +366,23 @@ class LiveFeed:
 
             except ConnectionClosed as e:
                 self.connected = False
-                self.error_message = str(e)
+                self.error_message = f'Closed ({e.code})'
                 self.on_status(f'CONNECTION CLOSED: {e.code} {e.reason}')
             except OSError as e:
                 self.connected = False
-                self.error_message = str(e)
+                self.error_message = f'Network: {e}'
                 self.on_status(f'CONNECTION ERROR: {e}')
             except Exception as e:
                 self.connected = False
-                self.error_message = str(e)
+                self.error_message = f'Error: {e}'
                 self.on_status(f'ERROR: {e}')
 
             if not self.reconnect or self._stop_event.is_set():
                 break
 
-            wait = min(5 * attempt, 30)
-            self.on_status(f'RECONNECTING in {wait}s...')
+            wait = min(3 + (attempt * 2), 20)
+            status_text = f'{self.error_message} | RECONNECTING in {wait}s...' if self.error_message else f'RECONNECTING in {wait}s...'
+            self.on_status(status_text)
             for _ in range(wait * 10):
                 if self._stop_event.is_set():
                     return
