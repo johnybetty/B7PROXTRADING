@@ -1162,7 +1162,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>B7PROXTRADING</title>
+  <title>TRADER B7PRO BOT</title>
   <style>
     :root {
       --bg: #050507; --panel: #0E0F14; --panel2: #14151B; --edge: #29232D;
@@ -1362,7 +1362,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <div class="broker-dot"></div>
       <span class="broker-name" id="broker-name">BINOMO</span>
     </div>
-    <div style="font-size:11px;font-weight:900;color:var(--red);letter-spacing:2px">B7PROXTRADING</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <img src="/logo.png" style="width:24px;height:24px;border-radius:6px;object-fit:cover;box-shadow:0 0 8px rgba(59,130,246,0.6)" onerror="this.style.display='none'">
+      <span style="font-size:11px;font-weight:900;color:#38bdf8;letter-spacing:1px;text-shadow:0 0 8px rgba(56,189,248,0.4)">TRADER B7PRO BOT</span>
+    </div>
     <div class="wallet-pill" id="wallet-pill" onclick="toggleWallet()">
       <span class="wallet-label" id="wallet-label">DEMO</span>
     </div>
@@ -3031,6 +3034,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        elif self.path == '/logo.png':
+            logo_path = os.path.join(BASE_DIR, 'logo.png')
+            if not os.path.exists(logo_path):
+                # Fallback jika di internal Android storage
+                logo_path = os.path.join(os.environ.get('ANDROID_FILES_DIR', BASE_DIR), 'logo.png')
+            if os.path.exists(logo_path):
+                with open(logo_path, 'rb') as f:
+                    logo_bytes = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/png')
+                self.send_header('Content-Length', str(len(logo_bytes)))
+                self.send_header('Cache-Control', 'public, max-age=86400')
+                self.end_headers()
+                self.wfile.write(logo_bytes)
+            else:
+                self.send_response(404)
+                self.end_headers()
 
         elif self.path == '/api/state':
             with lock:

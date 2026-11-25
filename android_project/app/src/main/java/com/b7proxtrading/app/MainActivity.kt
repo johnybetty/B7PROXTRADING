@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.webkit.*
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +27,7 @@ import java.net.URL
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var splashLogo: ImageView
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
 
@@ -38,6 +40,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webView)
+        splashLogo = findViewById(R.id.splashLogo)
         progressBar = findViewById(R.id.progressBar)
         statusText = findViewById(R.id.statusText)
 
@@ -86,6 +89,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
+                splashLogo.visibility = View.GONE
                 progressBar.visibility = View.GONE
                 statusText.visibility = View.GONE
                 webView.visibility = View.VISIBLE

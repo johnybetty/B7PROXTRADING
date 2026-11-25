@@ -46,9 +46,9 @@ class TradingService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("B7PROX TRADING Engine")
+            .setContentTitle("TRADER B7PRO BOT Engine")
             .setContentText("Trading bot & WebSocket feed aktif di background")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
