@@ -38,6 +38,7 @@ def start_engine(files_dir=None):
             # Jika BASE_DIR di main.py merujuk ke read-only APK asset, alihkan ke files_dir internal
             if files_dir:
                 main.BASE_DIR = files_dir
+                main.SESSION_FILE = os.path.join(files_dir, 'session_config.json')
                 main.SIGNALS_CSV_LIVE = os.path.join(files_dir, 'signals_live.csv')
 
             # Jalankan main.main() di background thread

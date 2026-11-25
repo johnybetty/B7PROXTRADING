@@ -87,8 +87,14 @@ class MainActivity : AppCompatActivity() {
         settings.displayZoomControls = false
         settings.cacheMode = WebSettings.LOAD_DEFAULT
 
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
+
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
+                CookieManager.getInstance().flush()
                 splashLogo.visibility = View.GONE
                 progressBar.visibility = View.GONE
                 statusText.visibility = View.GONE

@@ -27,8 +27,10 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-# ── Application Base Directory (EXE & Standalone-friendly) ───────────────────
-if getattr(sys, 'frozen', False):
+# ── Application Base Directory (EXE, Android & Standalone-friendly) ───────────
+if os.environ.get('ANDROID_FILES_DIR') and os.path.exists(os.environ['ANDROID_FILES_DIR']):
+    BASE_DIR = os.environ['ANDROID_FILES_DIR']
+elif getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -101,19 +103,30 @@ def export_signals_csv():
 SESSION_FILE = os.path.join(BASE_DIR, 'session_config.json')
 
 def save_session_config(data: dict):
+    session_file = os.path.join(BASE_DIR, 'session_config.json')
     try:
-        with open(SESSION_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
+        current = {}
+        if os.path.exists(session_file):
+            try:
+                with open(session_file, 'r', encoding='utf-8') as f:
+                    current = json.load(f)
+            except Exception:
+                pass
+        current.update(data)
+        with open(session_file, 'w', encoding='utf-8') as f:
+            json.dump(current, f, indent=2)
+        print(f"[+] Sesi akun tersimpan ke {session_file}")
+    except Exception as e:
+        print(f"[!] Gagal menyimpan sesi akun: {e}")
 
 def load_session_config() -> dict:
-    if os.path.exists(SESSION_FILE):
+    session_file = os.path.join(BASE_DIR, 'session_config.json')
+    if os.path.exists(session_file):
         try:
-            with open(SESSION_FILE, 'r', encoding='utf-8') as f:
+            with open(session_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[!] Gagal memuat sesi akun: {e}")
     return {}
 
 _initial_cfg = load_session_config()
@@ -951,6 +964,9 @@ def auto_ensure_credentials() -> bool:
                 with lock:
                     app_state['authtoken'] = token
                     app_state['device_id'] = dev_id
+                    app_state['broker'] = broker
+                    if email: app_state['email'] = email
+                    if cfg.get('user_id'): app_state['user_id'] = cfg.get('user_id')
                     app_state['balance_demo'] = res['demo']
                     app_state['balance_real'] = res['real']
                     app_state['currency'] = res.get('currency', 'IDR')
@@ -2827,10 +2843,18 @@ async function loadAutoCredentials() {
     if (d.authtoken) document.getElementById('inp-authtoken').value = d.authtoken;
     if (d.device_id) document.getElementById('inp-deviceid').value  = d.device_id;
     if (d.user_id)   document.getElementById('inp-userid').value    = d.user_id;
-    if (d.email)     document.getElementById('inp-email').value     = d.email;
+    if (d.email) {
+      document.getElementById('inp-email').value      = d.email;
+      const autoEmail = document.getElementById('inp-auto-email');
+      if (autoEmail) autoEmail.value = d.email;
+    }
+    if (d.broker) {
+      const bSel = document.getElementById('inp-broker');
+      if (bSel) bSel.value = d.broker;
+    }
     const sb = document.getElementById('conn-status-box');
-    if (sb && d.authtoken) {
-      sb.textContent = '✅ Token & Device ID terhubung otomatis dari sesi aktif!';
+    if (sb && (d.authtoken || d.logged_in)) {
+      sb.textContent = '✅ Akun terhubung otomatis dari sesi tersimpan!';
     }
   } catch(e) {}
 }
@@ -3073,13 +3097,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(combined)
 
         elif self.path == '/api/credentials':
+            cfg = load_session_config()
             with lock:
                 self._send_json({
-                    'authtoken': app_state.get('authtoken', ''),
-                    'device_id': app_state.get('device_id', ''),
-                    'user_id':   app_state.get('user_id', ''),
-                    'email':     app_state.get('email', ''),
-                    'broker':    app_state.get('broker', 'Binomo'),
+                    'authtoken': app_state.get('authtoken', '') or cfg.get('authtoken', ''),
+                    'device_id': app_state.get('device_id', '') or cfg.get('device_id', ''),
+                    'user_id':   app_state.get('user_id', '') or cfg.get('user_id', ''),
+                    'email':     app_state.get('email', '') or cfg.get('email', ''),
+                    'broker':    app_state.get('broker', 'Binomo') or cfg.get('broker', 'Binomo'),
+                    'logged_in': bool(app_state.get('logged_in') or cfg.get('authtoken')),
                 })
 
         elif self.path == '/api/assets':
@@ -3338,6 +3364,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 app_state['user_id']   = user_id
                 app_state['email']     = email
                 app_state['logged_in'] = True
+            
+            # Simpan kredensial ke session_config.json agar tidak perlu login ulang saat app dibuka
+            save_session_config({
+                'broker':    broker,
+                'email':     email,
+                'password':  password,
+                'authtoken': authtoken,
+                'device_id': device_id,
+                'user_id':   user_id,
+                'pair':      pair,
+            })
             try:
                 GATE.set_session({
                     'broker':    broker.lower(),
@@ -3377,8 +3414,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 app_state['device_id'] = device_id
                 app_state['broker']    = broker
                 app_state['pair']      = pair
+                app_state['logged_in'] = True
                 if user_id: app_state['user_id'] = user_id
                 if email:   app_state['email']   = email
+
+            # Simpan sesi token & device_id aktif
+            save_session_config({
+                'broker':    broker,
+                'authtoken': authtoken,
+                'device_id': device_id,
+                'user_id':   user_id or app_state.get('user_id', ''),
+                'email':     email or app_state.get('email', ''),
+                'pair':      pair,
+            })
             try:
                 GATE.set_session({
                     'broker':    broker.lower(),
