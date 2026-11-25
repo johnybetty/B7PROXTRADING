@@ -3105,9 +3105,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             acc_type = app_state.get('wallet', 'DEMO').lower()
             broker_deals = fetch_broker_deals_history(acc_type)
             with lock:
-                local_running = [o for o in app_state.get('orders_history', []) if o.get('status') == 'RUNNING']
+                local_orders = [
+                    o for o in app_state.get('orders_history', [])
+                    if o.get('status') in ('RUNNING', 'REJECTED')
+                ][:15]
             known_ids = {o.get('deal_id') for o in broker_deals if o.get('deal_id')}
-            combined = [o for o in local_running if o.get('deal_id') not in known_ids] + broker_deals
+            combined = [o for o in local_orders if not o.get('deal_id') or o.get('deal_id') not in known_ids] + broker_deals
             self._send_json(combined)
 
         elif self.path == '/api/credentials':

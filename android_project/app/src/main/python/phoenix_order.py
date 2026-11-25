@@ -45,6 +45,14 @@ DOMAINS = {
     'Stockity': 'stockity1.id',
 }
 
+DOMAIN_CANDIDATES = {
+    'Binomo':   ['binomo5.com', 'binomo.com'],
+    'Stockity': ['stockity1.id', 'stockity.com', 'stockity.id'],
+}
+
+def _normalize_broker(broker: str) -> str:
+    return 'Stockity' if str(broker or '').strip().lower() == 'stockity' else 'Binomo'
+
 def calculate_turbo_expire_at(duration_seconds: int = 60) -> int:
     """Hitung expiry epoch timestamp sesuai aturan Turbo Binomo.
     Jika detik saat ini < 30s: expiry = candle menit saat ini (menit + 1).
@@ -61,8 +69,9 @@ def calculate_turbo_expire_at(duration_seconds: int = 60) -> int:
 
 class PhoenixOrderClient:
     def __init__(self, broker: str = 'Binomo', authtoken: str = '', device_id: str = '', pair: str = 'Z-CRY/IDX'):
-        self.broker = broker
-        self.domain = DOMAINS.get(broker, 'binomo5.com')
+        self.broker = _normalize_broker(broker)
+        self.domains = DOMAIN_CANDIDATES.get(self.broker, ['binomo5.com'])
+        self.domain = self.domains[0]
         self.authtoken = authtoken
         self.device_id = device_id
         self.pair = pair
@@ -191,14 +200,20 @@ class PhoenixOrderClient:
         self.status = "DISCONNECTED"
 
     async def _main_task(self):
+        attempt = 0
         while self._running:
             if not self.authtoken or not self.device_id:
                 self.status = "NO_CREDENTIALS"
                 await asyncio.sleep(2)
                 continue
 
+            self.domain = self.domains[attempt % len(self.domains)]
+            self.ws_url = f"wss://ws.{self.domain}/?v=2&vsn=2.0.0"
+            self.origin = f"https://{self.domain}"
+            attempt += 1
+
             try:
-                self.status = "CONNECTING"
+                self.status = f"CONNECTING ({self.domain})"
                 headers = self._headers()
                 connect_kwargs = {
                     'ssl': get_ssl_context(),
@@ -382,7 +397,8 @@ _client: Optional[PhoenixOrderClient] = None
 
 def get_order_client(broker: str = 'Binomo', authtoken: str = '', device_id: str = '', pair: str = 'Z-CRY/IDX') -> PhoenixOrderClient:
     global _client
-    if _client is not None and _client.broker != broker:
+    norm_broker = _normalize_broker(broker)
+    if _client is not None and _client.broker != norm_broker:
         try:
             _client.stop()
         except Exception:
@@ -390,7 +406,7 @@ def get_order_client(broker: str = 'Binomo', authtoken: str = '', device_id: str
         _client = None
 
     if _client is None:
-        _client = PhoenixOrderClient(broker=broker, authtoken=authtoken, device_id=device_id, pair=pair)
+        _client = PhoenixOrderClient(broker=norm_broker, authtoken=authtoken, device_id=device_id, pair=pair)
         _client.start()
     else:
         _client.update_credentials(authtoken=authtoken, device_id=device_id, pair=pair)
