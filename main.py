@@ -1830,8 +1830,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <!-- REAL WALLET MODAL -->
 <div class="modal-overlay" id="real-modal">
   <div class="modal-card">
-    <div class="modal-title">⚠ AKUN REAL</div>
-    <div class="modal-body">Kamu akan beralih ke akun REAL. Bot ini hanya memberikan sinyal (Signal Only). Transaksi tetap dilakukan manual oleh kamu. Lanjutkan?</div>
+    <div class="modal-title">⚠ KONFIRMASI AKUN REAL</div>
+    <div class="modal-body">Kamu akan beralih ke akun REAL. Jika Auto-Order &amp; tombol START aktif, bot akan mengeksekusi transaksi order secara OTOMATIS menggunakan saldo REAL Anda. Lanjutkan?</div>
     <div class="modal-btns">
       <button class="m-btn m-cancel" onclick="closeRealModal()">Batal</button>
       <button class="m-btn m-confirm" onclick="confirmReal()">Lanjutkan</button>
